@@ -1,0 +1,12 @@
+{
+  "name": "{{ project_name_vcpkg }}",
+  "version": "1.0.0",
+  "description": "{{ project_name }} executable application",
+  "features": {
+    "test": {
+      "description": "Dependencies for running tests",
+      "dependencies": [
+      ]
+    }
+  }
+}
