@@ -1,6 +1,6 @@
-#include "{{ project_name_underscore }}.h"
+#include <iostream>
 
 int main() {
-    ridge::print_message();
+    std::cout << "Hello from {{ project_name }}!" << std::endl;
     return 0;
 }
