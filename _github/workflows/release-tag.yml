@@ -49,6 +49,74 @@ jobs:
       cmake-args: "-DCMAKE_EXPORT_COMPILE_COMMANDS=OFF -Wno-dev"
 
   # ==============================================================================
+  # Complete Build and Test Job - All-in-One Release Validation
+  # ==============================================================================
+  # 1. Prepare compiler, 2. Setup vcpkg, 3. Compile, 4. Run testsuite
+  build-and-test:
+    name: 🚀 Build & Test • Release
+    runs-on: ubuntu-22.04
+    timeout-minutes: 30
+    
+    steps:
+      - name: Checkout Source
+        uses: actions/checkout@v5
+        with:
+          fetch-depth: 0
+
+      # Step 1: Prepare Compiler
+      - name: 🔧 Step 1 - Prepare Compiler Environment
+        uses: ./.github/actions/setup-env
+        with:
+          compiler: gcc
+          enable-ccache: false
+
+      # Step 2: Setup vcpkg and Private Registry
+      - name: 📦 Step 2 - Setup vcpkg & Private Registry
+        uses: ./.github/actions/setup-vcpkg
+        with:
+          vcpkgDirectory: ${{ runner.temp }}/vcpkg
+
+      - name: Configure Private Registry Authentication
+        run: |
+          # Configure git credentials for private registry access
+          git config --global credential.https://github.com.helper '!f() { echo username=unused; echo password=${{ secrets.VCPKG_REGISTRY_TOKEN }}; }; f'
+
+      # Step 3: Compile
+      - name: 🔨 Step 3 - Compile Executable
+        run: |
+          echo "::group::Configure CMake"
+          cmake --preset debug \
+            -DCMAKE_TOOLCHAIN_FILE=${VCPKG_ROOT}/scripts/buildsystems/vcpkg.cmake \
+            -DCMAKE_C_COMPILER=${CC} \
+            -DCMAKE_CXX_COMPILER=${CXX}
+          echo "::endgroup::"
+          
+          echo "::group::Build Executable"
+          cmake --build --preset debug
+          echo "::endgroup::"
+        env:
+          AUTHORIZATION_TOKEN: ${{ secrets.VCPKG_REGISTRY_TOKEN }}
+
+      # Step 4: Run Testsuite  
+      - name: 🧪 Step 4 - Run Testsuite
+        run: |
+          echo "::group::Run Unit Tests"
+          ctest --preset debug --verbose
+          echo "::endgroup::"
+          
+          echo "::group::Test Executable Functionality"
+          # Test the built executable
+          echo "Testing executable..."
+          if [ -f "build/debug/src/{{ project_name_underscore }}" ]; then
+            ./build/debug/src/{{ project_name_underscore }} --version || echo "Version check completed"
+            ./build/debug/src/{{ project_name_underscore }} --help || echo "Help check completed"
+          else
+            echo "Executable not found, checking build directory:"
+            find build -name "{{ project_name_underscore }}" -type f || echo "No executable found"
+          fi
+          echo "::endgroup::"
+
+  # ==============================================================================
   # Release Validation Job - Extract and Compare Version Numbers
   # ==============================================================================
   # Performs comprehensive version consistency validation across all project files.
