@@ -36,17 +36,55 @@ jobs:
   # ==============================================================================
   # CMake Build Job - Configure Project and Generate CMakeCache.txt
   # ==============================================================================
-  # Uses reusable cmake-build.yml workflow to configure the project and generate
-  # CMakeCache.txt needed for version extraction. Includes setup-env.yml automatically.
+  # Configures the project and generates CMakeCache.txt needed for version extraction.
   cmake-build:
     name: 🔨 CMake Configure for Version Extraction
-    uses: ./.github/workflows/cmake-build.yml
-    with:
-      compiler: gcc
-      buildType: debug
-      enable-ccache-stats: false
-      enable-testing: false
-      cmake-args: "-DCMAKE_EXPORT_COMPILE_COMMANDS=OFF -Wno-dev"
+    runs-on: ubuntu-22.04
+    timeout-minutes: 15
+    
+    steps:
+      - name: Checkout Source
+        uses: actions/checkout@v5
+        with:
+          fetch-depth: 0
+
+      - name: 🔧 Setup Compiler Environment
+        uses: ./.github/actions/setup-env
+        with:
+          compiler: gcc
+          enable-ccache: false
+
+      - name: 📦 Setup vcpkg & Private Registry
+        uses: ./.github/actions/setup-vcpkg
+        with:
+          vcpkgDirectory: ${{ runner.temp }}/vcpkg
+
+      - name: Configure Private Registry Authentication
+        run: |
+          git config --global credential.https://github.com.helper '!f() { echo username=unused; echo password=${{ secrets.VCPKG_REGISTRY_TOKEN }}; }; f'
+
+      - name: 🔨 Configure CMake (for version extraction)
+        run: |
+          echo "::group::Configure CMake"
+          cmake --preset debug \
+            -DCMAKE_TOOLCHAIN_FILE=${VCPKG_ROOT}/scripts/buildsystems/vcpkg.cmake \
+            -DCMAKE_C_COMPILER=${CC} \
+            -DCMAKE_CXX_COMPILER=${CXX} \
+            -DCMAKE_EXPORT_COMPILE_COMMANDS=OFF \
+            -Wno-dev
+          echo "::endgroup::"
+        env:
+          AUTHORIZATION_TOKEN: ${{ secrets.VCPKG_REGISTRY_TOKEN }}
+
+      - name: Upload Build Artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: build-artifacts-debug-gcc
+          path: |
+            build/debug/CMakeCache.txt
+            build/debug/cmake_install.cmake
+          retention-days: 1
+          if-no-files-found: error
 
   # ==============================================================================
   # Complete Build and Test Job - All-in-One Release Validation
@@ -153,7 +191,7 @@ jobs:
         uses: actions/download-artifact@v4
         with:
           name: build-artifacts-debug-gcc
-          path: build/
+          path: build/debug/
 
       - name: Extract CMake Version
         id: cmake-version
@@ -161,14 +199,14 @@ jobs:
           echo "::group::Extract CMAKE version from cmake-build job cache"
           
           # Verify CMakeCache.txt exists from cmake-build job
-          if [[ ! -f "build/CMakeCache.txt" ]]; then
+          if [[ ! -f "build/debug/CMakeCache.txt" ]]; then
             echo "::error::CMakeCache.txt not found in build directory from cmake-build job"
             echo "❌ CMakeCache.txt not found!"
             echo ""
-            echo "   The cmake-build job should have created build/CMakeCache.txt"
+            echo "   The cmake-build job should have created build/debug/CMakeCache.txt"
             echo "   Check that the cmake-build job completed successfully"
             echo "   Build directory contents:"
-            ls -la build/ 2>/dev/null || echo "   build/ directory not found"
+            ls -la build/debug/ 2>/dev/null || echo "   build/debug/ directory not found"
             exit 1
           fi
           
@@ -176,10 +214,10 @@ jobs:
           
           # Debug: Show version-related entries in CMakeCache.txt
           echo "🔍 Debug: Version entries in CMakeCache.txt:"
-          grep -i "version" build/CMakeCache.txt | head -10 || echo "No version entries found"
+          grep -i "version" build/debug/CMakeCache.txt | head -10 || echo "No version entries found"
           
           # Extract CMAKE_PROJECT_VERSION from CMakeCache.txt (most reliable method)
-          CMAKE_VERSION=$(sed -n 's/^CMAKE_PROJECT_VERSION:.*=\(.*\)$/\1/p' build/CMakeCache.txt 2>/dev/null | head -n1 | tr -d ' ')
+          CMAKE_VERSION=$(sed -n 's/^CMAKE_PROJECT_VERSION:.*=\(.*\)$/\1/p' build/debug/CMakeCache.txt 2>/dev/null | head -n1 | tr -d ' ')
           
           echo "🔍 Debug: CMAKE_PROJECT_VERSION found: '$CMAKE_VERSION'"
           
